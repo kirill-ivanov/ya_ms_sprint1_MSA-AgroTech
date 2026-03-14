@@ -1,0 +1,40 @@
+@startuml C4_Component_S1_VideoAnalytics
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title C4 Component — Video Analytics (Решение 1, Farm Agent)
+
+Container_Ext(cameras, "IP-камеры (мульти-вендор)", "RTSP", "Видеопоток день/ночь.")
+Container_Ext(nn_model, "Нейросетевая модель (партнёр)", "ONNX", "Модель детекции поведения и состояния.")
+Container_Ext(event_engine, "Event Engine", "Go / gRPC", "Получает события детекции.")
+
+Container_Boundary(va, "Video Analytics (Python / OpenCV + ONNX Runtime)") {
+
+    Component(stream_manager, "Stream Manager", "Python / OpenCV", "Открывает и поддерживает RTSP-соединения с камерами. Автоматически переподключается при обрыве потока. Управляет пулом потоков по одному на камеру.")
+
+    Component(frame_preprocessor, "Frame Preprocessor", "Python / NumPy","Декодирование кадров из видеопотока. Масштабирование и нормализация под входной тензор модели. Фильтрация дублирующих кадров по хэшу.")
+
+    Component(inference_engine, "Inference Engine", "ONNX Runtime + CUDA", "Запуск инференса нейросетевой модели. Пакетная обработка кадров для более эффективного использования GPU. Возвращает bounding boxes (рамки), классы и точность.")
+
+    Component(detection_postprocessor, "Detection Postprocessor", "Python", "Применение порогов уверенности (confidence threshold). Фильтрация перекрывающихся детекций для устранения дублирующих рамок. Координатное преобразование из тензорного пространства в пиксели кадра.")
+
+    Component(animal_tracker, "Animal Tracker", "Python / OpenCV", "Трекинг особей между кадрами по IoU бокса. Присвоение временного track_id в рамках сессии. Сброс трека при длительном отсутствии в кадре.")
+
+    Component(event_classifier, "Event Classifier", "Python", "Классификация обнаруженных событий: драка, задавливание живности, болезнь / аномальная поза, гибель, беспокойство, норма. Подсчёт поголовья по уникальным track_id в кадре.")
+
+    Component(model_loader, "Model Loader", "Python", "Загрузка ONNX-модели с диска при старте. Проверка совместимости версии модели. Поддержка горячей замены модели без перезапуска сервиса.")
+
+    Component(va_grpc_server, "gRPC Server", "Python / grpcio", "Публикует DetectionEvent в Event Engine. Методы: StreamDetectionEvents (серверный стриминг), GetAnimalCount, GetServiceHealth.")
+}
+
+Rel(cameras, stream_manager, "Видеопоток", "RTSP")
+Rel(nn_model, model_loader, "Файл модели", "ONNX / filesystem")
+Rel(stream_manager, frame_preprocessor, "Сырые кадры", "In-process")
+Rel(frame_preprocessor, inference_engine, "Нормализованные тензоры", "In-process")
+Rel(model_loader, inference_engine, "Загруженная модель", "In-process")
+Rel(inference_engine, detection_postprocessor, "Raw bounding boxes", "In-process")
+Rel(detection_postprocessor, animal_tracker, "Отфильтрованные детекции", "In-process")
+Rel(animal_tracker, event_classifier, "Детекции с track_id", "In-process")
+Rel(event_classifier, va_grpc_server, "Классифицированные события", "In-process")
+Rel(va_grpc_server, event_engine, "DetectionEvent stream", "gRPC")
+
+@enduml

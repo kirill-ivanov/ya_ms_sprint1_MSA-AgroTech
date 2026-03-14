@@ -1,0 +1,145 @@
+@startuml C4_Code_S1_RuleEngine
+title C4 Code — Rule Engine (Решение 1, Event Engine / Go)
+
+skinparam classAttributeIconSize 0
+skinparam classFontSize 13
+skinparam defaultFontName Arial
+
+' ─── Domain Events (входящие) ────────────────────────────────────
+class IncomingEvent {
+    + EventID: uuid.UUID
+    + FarmID: string
+    + EventType: string
+    + Payload: map[string]interface{}
+    + OccurredAt: time.Time
+}
+
+' ─── Rule DSL ────────────────────────────────────────────────────
+interface Rule {
+    + ID(): string
+    + Evaluate(event IncomingEvent, ctx RuleContext): (bool, error)
+    + AlertLevel(): AlertLevel
+    + Description(): string
+}
+
+class ThresholdRule {
+    - id: string
+    - field: string
+    - operator: CompareOp
+    - threshold: float64
+    - alertLevel: AlertLevel
+    + ID(): string
+    + Evaluate(event IncomingEvent, ctx RuleContext): (bool, error)
+    + AlertLevel(): AlertLevel
+    + Description(): string
+}
+
+class TimeWindowRule {
+    - id: string
+    - innerRule: Rule
+    - windowDuration: time.Duration
+    - minOccurrences: int
+    - alertLevel: AlertLevel
+    + ID(): string
+    + Evaluate(event IncomingEvent, ctx RuleContext): (bool, error)
+    + AlertLevel(): AlertLevel
+    + Description(): string
+}
+
+class CompositeRule {
+    - id: string
+    - rules: []Rule
+    - operator: LogicalOp
+    - alertLevel: AlertLevel
+    + ID(): string
+    + Evaluate(event IncomingEvent, ctx RuleContext): (bool, error)
+    + AlertLevel(): AlertLevel
+    + Description(): string
+}
+
+enum AlertLevel {
+    INFO
+    WARNING
+    CRITICAL
+}
+
+enum CompareOp {
+    GT
+    GTE
+    LT
+    LTE
+    EQ
+}
+
+enum LogicalOp {
+    AND
+    OR
+}
+
+' ─── Rule Context ─────────────────────────────────────────────────
+interface RuleContext {
+    + EventHistory(farmID string, eventType string, since time.Time): []IncomingEvent
+    + GetDeviceState(deviceID string): DeviceState
+}
+
+class InMemoryRuleContext {
+    - eventRingBuffer: map[string][]IncomingEvent
+    - deviceStates: map[string]DeviceState
+    + EventHistory(farmID string, eventType string, since time.Time): []IncomingEvent
+    + GetDeviceState(deviceID string): DeviceState
+    + AppendEvent(event IncomingEvent): void
+}
+
+' ─── Rule Engine ─────────────────────────────────────────────────
+class RuleEngine {
+    - rules: []Rule
+    - context: RuleContext
+    - mu: sync.RWMutex
+    + Evaluate(event IncomingEvent): []RuleMatch
+    + AddRule(rule Rule): void
+    + RemoveRule(ruleID string): void
+    + LoadFromConfig(cfg RuleConfig): void
+}
+
+class RuleMatch {
+    + Rule: Rule
+    + Event: IncomingEvent
+    + MatchedAt: time.Time
+}
+
+' ─── Config ──────────────────────────────────────────────────────
+class RuleConfig {
+    + Rules: []RuleDefinition
+    + FromYAML(path string): RuleConfig
+}
+
+class RuleDefinition {
+    + ID: string
+    + Type: string
+    + Field: string
+    + Operator: string
+    + Threshold: float64
+    + Window: string
+    + MinOccurrences: int
+    + AlertLevel: string
+}
+
+' ─── Relations ────────────────────────────────────────────────────
+Rule <|.. ThresholdRule
+Rule <|.. TimeWindowRule
+Rule <|.. CompositeRule
+TimeWindowRule --> Rule : wraps
+CompositeRule "1" *-- "many" Rule : composes
+ThresholdRule --> CompareOp
+CompositeRule --> LogicalOp
+Rule --> AlertLevel
+
+RuleEngine "1" *-- "many" Rule
+RuleEngine --> RuleContext
+RuleEngine ..> RuleMatch : produces
+RuleContext <|.. InMemoryRuleContext
+
+RuleConfig "1" *-- "many" RuleDefinition
+RuleEngine --> RuleConfig : loads
+
+@enduml

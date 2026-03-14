@@ -1,0 +1,135 @@
+@startuml C4_Code_S1_EventClassifier
+title C4 Code — Event Classifier (Решение 1, Video Analytics)
+
+skinparam classAttributeIconSize 0
+skinparam classFontSize 13
+skinparam defaultFontName Arial
+
+' ─── Value Objects ───────────────────────────────────────────────
+class BoundingBox {
+    + x: float
+    + y: float
+    + width: float
+    + height: float
+    + iou(other: BoundingBox): float
+}
+
+class Detection {
+    + track_id: str
+    + class_name: str
+    + confidence: float
+    + bbox: BoundingBox
+    + camera_id: str
+    + frame_ts: datetime
+}
+
+' ─── Domain Events ───────────────────────────────────────────────
+class DetectionEvent {
+    + event_id: UUID
+    + farm_id: str
+    + camera_id: str
+    + event_type: EventType
+    + animal_count: int
+    + detections: List[Detection]
+    + occurred_at: datetime
+    + confidence: float
+}
+
+enum EventType {
+    FIGHT
+    PIGLET_CRUSHING
+    ILLNESS_SUSPECTED
+    ANIMAL_DEAD
+    ANXIETY
+    HEADCOUNT
+    NORMAL
+}
+
+' ─── Classifier ──────────────────────────────────────────────────
+class EventClassifier {
+    - _config: ClassifierConfig
+    - _rules: List[ClassificationRule]
+    + classify(detections: List[Detection], camera_id: str): List[DetectionEvent]
+    - _count_unique_animals(detections: List[Detection]): int
+    - _apply_rules(detections: List[Detection]): List[EventType]
+    - _build_event(event_type: EventType, detections: List[Detection], camera_id: str): DetectionEvent
+}
+
+interface ClassificationRule {
+    + matches(detections: List[Detection]): bool
+    + event_type(): EventType
+}
+
+class FightDetectionRule {
+    - _min_overlap_iou: float
+    - _min_animals: int
+    + matches(detections: List[Detection]): bool
+    + event_type(): EventType
+}
+
+class PigletCrushingRule {
+    - _size_ratio_threshold: float
+    - _overlap_threshold: float
+    + matches(detections: List[Detection]): bool
+    + event_type(): EventType
+}
+
+class IllnessRule {
+    - _abnormal_pose_classes: List[str]
+    - _min_confidence: float
+    + matches(detections: List[Detection]): bool
+    + event_type(): EventType
+}
+
+class HeadcountRule {
+    + matches(detections: List[Detection]): bool
+    + event_type(): EventType
+}
+
+class ClassifierConfig {
+    + confidence_threshold: float
+    + fight_iou_threshold: float
+    + size_ratio_threshold: float
+    + headcount_interval_sec: int
+    + from_yaml(path: str): ClassifierConfig
+}
+
+' ─── Publisher ───────────────────────────────────────────────────
+interface EventPublisher {
+    + publish(event: DetectionEvent): None
+}
+
+class GrpcEventPublisher {
+    - _stub: VideoAnalyticsStub
+    - _channel: grpc.Channel
+    + publish(event: DetectionEvent): None
+    - _to_proto(event: DetectionEvent): DetectionEventProto
+}
+
+' ─── Pipeline orchestration ──────────────────────────────────────
+class VideoAnalyticsPipeline {
+    - _classifier: EventClassifier
+    - _publisher: EventPublisher
+    - _tracker: AnimalTracker
+    + process_frame(frame: np.ndarray, camera_id: str): None
+}
+
+' ─── Relations ───────────────────────────────────────────────────
+DetectionEvent --> EventType
+DetectionEvent "1" *-- "many" Detection
+Detection --> BoundingBox
+
+EventClassifier --> ClassifierConfig
+EventClassifier "1" *-- "many" ClassificationRule
+ClassificationRule <|.. FightDetectionRule
+ClassificationRule <|.. PigletCrushingRule
+ClassificationRule <|.. IllnessRule
+ClassificationRule <|.. HeadcountRule
+
+EventClassifier ..> DetectionEvent : creates
+EventPublisher <|.. GrpcEventPublisher
+
+VideoAnalyticsPipeline --> EventClassifier
+VideoAnalyticsPipeline --> EventPublisher
+
+@enduml
