@@ -1,0 +1,50 @@
+@startuml C4_Container_MT_Option1_SchemaPerTenant
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title C4 Container — Мультитенантность: Вариант 1 (схема на тенанта, shared DB)
+
+Person(tenant_user, "Пользователь тенанта", "Оператор или менеджер фермы клиента.")
+Person(admin, "Администратор платформы", "Управляет тенантами, тарифами, биллингом.")
+
+System_Boundary(saas, "AgroVision SaaS — Центральная платформа") {
+
+    Container(api_gw, "API Gateway", "Kong", "Маршрутизация, TLS, rate limiting. Извлекает tenant_id из JWT-токена и передаёт заголовком.")
+    Container(auth_svc, "Auth Service", "Keycloak", "OIDC, RBAC. Каждый тенант — отдельный realm. Токен содержит tenant_id и роли.")
+    Container(tenant_svc, "Tenant Service", "Go", "Управление тенантами: регистрация, тарифы, лимиты. Создаёт схему БД при онбординге нового клиента.")
+    Container(analytics_svc, "Analytics Service", "Python / FastAPI", "Агрегация метрик. Все запросы к БД фильтруются по schema search_path текущего тенанта.")
+    Container(sync_svc, "Sync Service", "Go", "Приём данных от агентов ферм. Записывает в схему тенанта. Проверяет принадлежность агента тенанту.")
+    Container(billing_svc, "Billing Service", "Go", "Учёт использования (число ферм, событий, камер). Формирует счета. Интеграция с платёжными системами.")
+    Container(notification_svc, "Notification Service", "Node.js", "Push и SMS уведомления. Маршрутизация по tenant_id.")
+    Container(devportal, "Developer Portal", "Docusaurus", "Документация API, SDK, примеры интеграции для клиентов.")
+    Container(message_broker, "Message Broker", "RabbitMQ", "Асинхронная шина. Сообщения маршрутизируются в очереди с префиксом tenant_id.")
+
+    Container(shared_db, "Shared Database", "PostgreSQL", "Единый кластер. Изоляция через схемы: schema_tenant_A, schema_tenant_B и т.д. Row-level security как дополнительный слой.")
+    Container(metrics_db, "Metrics & Billing DB", "PostgreSQL", "Хранение метрик использования для биллинга. Общая схема, изоляция по tenant_id.")
+}
+
+System_Ext(farm_agent, "Farm Agent (агент на ферме)", "Работает на оборудовании клиента. Синхронизируется с платформой.")
+System_Ext(payment_ru, "Российские платёжные системы", "ЮKassa, ТБанк Касса, СБП.")
+System_Ext(client_erp, "ERP / системы клиента", "Корпоративные системы агрохолдинга-клиента.")
+System_Ext(sms_gw, "SMS-шлюз", "Уведомления операторам.")
+
+Rel(tenant_user, api_gw, "REST / WebSocket", "HTTPS")
+Rel(admin, api_gw, "Управление платформой", "HTTPS")
+Rel(api_gw, auth_svc, "Проверка токена", "HTTP")
+Rel(api_gw, analytics_svc, "Запросы аналитики", "HTTP")
+Rel(api_gw, tenant_svc, "Управление тенантом", "HTTP")
+Rel(api_gw, billing_svc, "Запросы биллинга", "HTTP")
+Rel(auth_svc, shared_db, "Данные пользователей", "SQL")
+Rel(analytics_svc, shared_db, "Чтение данных тенанта (schema)", "SQL")
+Rel(sync_svc, shared_db, "Запись в схему тенанта", "SQL")
+Rel(sync_svc, message_broker, "Публикация событий", "AMQP")
+Rel(analytics_svc, message_broker, "Подписка на события", "AMQP")
+Rel(notification_svc, message_broker, "Подписка на алерты", "AMQP")
+Rel(notification_svc, sms_gw, "SMS уведомления", "HTTPS")
+Rel(billing_svc, metrics_db, "Запись и чтение метрик", "SQL")
+Rel(billing_svc, payment_ru, "Выставление счетов и оплата", "HTTPS API")
+Rel(tenant_svc, shared_db, "Создание схемы тенанта", "SQL DDL")
+Rel(farm_agent, sync_svc, "Синхронизация данных фермы", "HTTPS / MQTT")
+Rel(api_gw, devportal, "Документация", "HTTPS")
+Rel(analytics_svc, client_erp, "Передача метрик по webhook", "REST API")
+
+@enduml

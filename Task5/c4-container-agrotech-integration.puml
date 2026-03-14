@@ -1,0 +1,67 @@
+@startuml C4_Container_SaaS_AgroTechX_Integration
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title C4 Container — Пример интеграции: АгроТех X как клиент SaaS-платформы
+
+Person(operator, "Оператор фермы", "Сотрудник АгроТех X. Получает алерты, управляет устройствами.")
+Person(manager, "Менеджер / ветеринар", "Сотрудник АгроТех X. Просматривает аналитику через веб-приложение.")
+Person(it_admin, "IT-администратор АгроТех X", "Управляет аккаунтом, добавляет фермы, настраивает интеграции.")
+
+System_Boundary(agrovision_saas, "AgroVision SaaS (платформа)") {
+    Container(api_gw, "API Gateway", "Kong", "Точка входа. Маршрутизация, tenant_id=agrotech_x.")
+    Container(auth_svc, "Auth Service", "Keycloak", "Realm АгроТех X. Пользователи, роли, SSO.")
+    Container(analytics_svc, "Analytics Service", "Python / FastAPI", "Метрики и отчёты по фермам АгроТех X.")
+    Container(sync_svc, "Sync Service", "Go", "Приём данных от агентов. Схема schema_agrotech_x.")
+    Container(billing_svc, "Billing Service", "Go", "Подписка АгроТех X: тариф Enterprise, 150 ферм.")
+    Container(notification_svc, "Notification Service", "Node.js", "Уведомления сотрудникам АгроТех X.")
+    Container(public_api, "Public API", "Go / Gin", "REST API для интеграции с ERP АгроТех X.")
+    Container(tenant_db, "Tenant DB (schema_agrotech_x)", "PostgreSQL", "Изолированная схема с данными всех ферм АгроТех X.")
+}
+
+System_Boundary(agrotech_infra, "Инфраструктура АгроТех X (on-premise)") {
+
+    Container(mobile_web, "Веб / мобильное приложение", "React / React Native", "Интерфейс для операторов и менеджеров АгроТех X.")
+
+    System_Boundary(farm1, "Ферма 1 (свиноводство)") {
+        Container(agent1, "Farm Agent 1", "Go + Python / GPU", "Видеоаналитика, IoT (кормушки, поилки), офлайн-уведомления.")
+        Container(cameras1, "IP-камеры", "RTSP", "Камеры с ИК-подсветкой.")
+        Container(iot1, "IoT-устройства", "MQTT / Modbus", "Кормушки, поилки, датчики воды.")
+    }
+
+    System_Boundary(farm2, "Ферма 2 (свиноводство)") {
+        Container(agent2, "Farm Agent 2", "Go + Python / GPU", "Видеоаналитика, IoT, офлайн-режим.")
+        Container(cameras2, "IP-камеры", "RTSP", "Камеры с ИК-подсветкой.")
+        Container(iot2, "IoT-устройства", "MQTT / Modbus", "Кормушки, поилки, датчики воды.")
+    }
+
+    Container(erp_agrotech, "ERP АгроТех X", "1C / SAP", "Корпоративная система. Получает метрики поголовья и расхода корма.")
+}
+
+System_Ext(sms_gw, "SMS-шлюз", "Уведомления операторам на фермах.")
+System_Ext(payment_ru, "Платёжные системы РФ", "Оплата подписки АгроТех X.")
+
+Rel(operator, mobile_web, "Мониторинг и управление", "HTTPS LAN")
+Rel(manager, mobile_web, "Аналитика и отчёты", "HTTPS")
+Rel(it_admin, api_gw, "Управление аккаунтом и фермами", "HTTPS")
+Rel(mobile_web, api_gw, "REST / WebSocket (tenant=agrotech_x)", "HTTPS")
+
+Rel(api_gw, auth_svc, "Проверка токена", "HTTP")
+Rel(api_gw, analytics_svc, "Запросы аналитики", "HTTP")
+Rel(api_gw, billing_svc, "Управление подпиской", "HTTP")
+Rel(analytics_svc, tenant_db, "Чтение данных ферм АгроТех X", "SQL")
+Rel(sync_svc, tenant_db, "Запись событий агентов", "SQL")
+Rel(notification_svc, sms_gw, "SMS операторам", "HTTPS")
+Rel(billing_svc, payment_ru, "Оплата подписки", "HTTPS API")
+Rel(public_api, erp_agrotech, "Метрики поголовья и расхода корма", "REST Webhook")
+
+Rel(cameras1, agent1, "Видеопоток", "RTSP")
+Rel(iot1, agent1, "Телеметрия и команды", "MQTT / Modbus")
+Rel(agent1, sync_svc, "Синхронизация данных (<=10 мин)", "HTTPS / MQTT")
+Rel(agent1, sms_gw, "SMS оператору при офлайне", "4G")
+
+Rel(cameras2, agent2, "Видеопоток", "RTSP")
+Rel(iot2, agent2, "Телеметрия и команды", "MQTT / Modbus")
+Rel(agent2, sync_svc, "Синхронизация данных (<=10 мин)", "HTTPS / MQTT")
+Rel(agent2, sms_gw, "SMS оператору при офлайне", "4G")
+
+@enduml
