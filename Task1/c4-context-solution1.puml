@@ -1,0 +1,38 @@
+@startuml C4_Context_Solution1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+title C4 Context — АгроТех X: Платформа мониторинга скота (Решение 1 — Основное)
+
+Enterprise_Boundary(agro, "АгроТех X") {
+
+    Person(operator, "Оператор фермы", "Дежурный сотрудник на ферме. Получает алерты, управляет кормушками и поилками в реальном времени.")
+    Person(manager, "Менеджер / ветеринар", "Просматривает аналитику, статус поголовья, отчёты через веб- или мобильное приложение.")
+
+    System_Boundary(central, "Центральная платформа (облако / ЦОД)") {
+        System(central_platform, "AgroVision", "Центральный сервер: аутентификация, аналитика, агрегация данных с ферм, REST/WebSocket API, SaaS-слой.")
+    }
+
+    System_Boundary(farm, "Агент на ферме (edge)") {
+        System(farm_agent, "Farm Agent", "Автономный агент: видеоаналитика (нейросеть), IoT-управление, локальная БД, офлайн-уведомления, синхронизация с центром.")
+    }
+}
+
+System_Ext(erp, "ERP / AgTech системы", "Существующие корпоративные системы АгроТех X: учёт техники, финансы, цепочки поставок.")
+System_Ext(camera_vendors, "IP-камеры (мульти-вендор)", "Видеокамеры разных производителей с поддержкой RTSP. Включая камеры с ИК для ночной съёмки.")
+System_Ext(iot_devices, "IoT-устройства", "Кормушки, поилки, датчики воды разных производителей. Протоколы: MQTT, Modbus, OPC-UA.")
+System_Ext(notify, "Каналы уведомлений", "SMS-шлюз, push-уведомления, локальная звуковая сигнализация.")
+System_Ext(nn_partner, "Нейросетевая модель (партнёр)", "Готовая модель детекции: драки, задавливание поросят, подсчёт голов, болезнь/гибель.")
+System_Ext(mobile_web, "Мобильное / веб-приложение", "Клиентские приложения для операторов и менеджеров. Потребляют API центральной платформы.")
+
+Rel(operator, farm_agent, "Получает локальные алерты, управляет устройствами", "Локальная сеть / SMS")
+Rel(manager, mobile_web, "Просматривает дашборды, аналитику, отчёты", "HTTPS")
+Rel(mobile_web, central_platform, "Запросы данных, управление", "REST / WebSocket API")
+Rel(farm_agent, central_platform, "Синхронизация событий, метрик, поголовья", "HTTPS / MQTT (<=10 мин задержка)")
+Rel(central_platform, erp, "Передача метрик и статусов поголовья", "REST API")
+Rel(camera_vendors, farm_agent, "Видеопоток", "RTSP")
+Rel(iot_devices, farm_agent, "Телеметрия устройств, команды управления", "MQTT / Modbus")
+Rel(farm_agent, notify, "Отправка алертов при событиях", "SMS / Push / Sound")
+Rel(nn_partner, farm_agent, "Поставка и обновление модели", "Деплой модели")
+Rel(central_platform, notify, "Глобальные уведомления менеджерам", "Push / Email")
+
+@enduml
