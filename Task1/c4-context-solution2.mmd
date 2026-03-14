@@ -1,0 +1,41 @@
+```mermaid
+C4Context
+    title C4 Context — АгроТех X: Платформа мониторинга скота (Решение 2 — Альтернативное)
+
+    Enterprise_Boundary(agro, "АгроТех X") {
+
+        Person(operator, "Оператор фермы", "Дежурный сотрудник на ферме. Получает алерты, управляет устройствами.")
+        Person(manager, "Менеджер / ветеринар", "Просматривает аналитику и отчёты через веб- или мобильное приложение.")
+
+        System_Boundary(central, "Лёгкий центральный узел (on-premise / облако)") {
+            System(central_platform, "Aggregation & Auth Service", "Минимальный центр: только аутентификация, агрегация итоговых метрик, единый API для клиентов. Бизнес-логика вынесена на фермы.")
+        }
+
+        System_Boundary(farm, "Fog-кластер на ферме") {
+            System(fog_analytics, "Video Analytics Node", "Выделенный GPU-сервер: инференс нейросети, трекинг животных, подсчёт голов. Работает автономно.")
+            System(fog_iot, "IoT Gateway Node", "Отдельный узел: управление кормушками, поилками, датчиками воды. Изолирован от видеоподсистемы.")
+            System(fog_event, "Edge Event & Notification Service", "Брокер событий на ферме (NATS/Mosquitto): маршрутизация алертов, локальные правила, офлайн-буфер.")
+        }
+    }
+
+    System_Ext(erp, "ERP / AgTech системы", "Существующие корпоративные системы АгроТех X.")
+    System_Ext(camera_vendors, "IP-камеры (мульти-вендор)", "Видеокамеры разных производителей, RTSP, ИК-съёмка.")
+    System_Ext(iot_devices, "IoT-устройства", "Кормушки, поилки, датчики воды. MQTT / Modbus / OPC-UA.")
+    System_Ext(lora, "LoRaWAN-сеть", "Резервный канал для IoT-датчиков при отказе WiFi.")
+    System_Ext(notify, "Каналы уведомлений", "SMS-шлюз, push, локальная сигнализация.")
+    System_Ext(nn_partner, "Нейросетевая модель (партнёр)", "Готовая модель детекции поведения и состояния животных.")
+    System_Ext(mobile_web, "Мобильное / веб-приложение", "Клиентские приложения. Потребляют API центрального узла.")
+
+    Rel(operator, fog_event, "Получает алерты, управляет устройствами", "Локальная сеть / SMS")
+    Rel(manager, mobile_web, "Просматривает дашборды и отчёты", "HTTPS")
+    Rel(mobile_web, central_platform, "Запросы агрегированных данных", "REST API")
+    Rel(fog_event, central_platform, "Синхронизация агрегированных событий и метрик", "HTTPS / MQTT (≤10 мин)")
+    Rel(central_platform, erp, "Передача ключевых метрик", "REST API")
+    Rel(camera_vendors, fog_analytics, "Видеопоток", "RTSP")
+    Rel(iot_devices, fog_iot, "Телеметрия и команды", "MQTT / Modbus")
+    Rel(lora, fog_iot, "Резервная телеметрия датчиков", "LoRaWAN")
+    Rel(fog_analytics, fog_event, "События детекции", "Внутренний MQTT/NATS")
+    Rel(fog_iot, fog_event, "События устройств", "Внутренний MQTT/NATS")
+    Rel(fog_event, notify, "Алерты операторам и менеджерам", "SMS / Push / Sound")
+    Rel(nn_partner, fog_analytics, "Поставка модели", "Деплой модели")
+```
