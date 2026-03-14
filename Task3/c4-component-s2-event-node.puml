@@ -1,0 +1,45 @@
+@startuml C4_Component_S2_EventNode
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title C4 Component — Edge Event & Notification Node (Решение 2, fog-кластер)
+
+Container_Ext(farm_broker, "Farm Message Broker", "NATS JetStream", "Внутрифермовая шина событий.")
+Container_Ext(local_notify, "Local Notifier", "Go", "SMS и звуковые алерты оператору.")
+Container_Ext(aggregation_svc, "Aggregation Service (центр)", "HTTPS", "Принимает синхронизируемые события.")
+Container_Ext(local_api, "Local API", "Go / Gin", "Управляющие команды от оператора.")
+Container_Ext(iot_hub, "IoT Gateway Node", "NATS", "Принимает команды управления устройствами.")
+
+Container_Boundary(en, "Edge Event & Notification Node (Go)") {
+
+    Component(nats_consumer, "NATS Consumer", "Go / nats.go", "Подписывается на топики farm.detection и farm.iot. Подтверждает получение сообщений (JetStream ACK). Обеспечивает at-least-once обработку.")
+
+    Component(event_dispatcher, "Event Dispatcher", "Go", "Маршрутизирует события по типу к нужному обработчику. Ring-buffer для сглаживания пиков нагрузки.")
+
+    Component(rule_engine, "Rule Engine", "Go", "Применяет правила алертов. Пороговые значения, временные окна, составные условия. Поддерживает пользовательские правила через YAML-конфиг.")
+
+    Component(incident_manager, "Incident Manager", "Go", "Создаёт, обновляет, дедуплицирует инциденты. Автозакрытие при нормализации. Журнал инцидентов в памяти + персистентность в центр через Sync Agent.")
+
+    Component(alert_router, "Alert Router", "Go", "Определяет канал и получателя по типу инцидента. Онлайн: в Sync Agent. Офлайн: в Local Notifier. Приоритизация критических событий.")
+
+    Component(connectivity_monitor, "Connectivity Monitor", "Go", "Проверяет доступность Aggregation Service. Переключает Alert Router между режимами. Запускает досылку при восстановлении.")
+
+    Component(sync_agent, "Sync Agent", "Go", "Буферизация инцидентов и метрик при офлайне. Инкрементная отправка по checkpoint. Идемпотентность через UUID событий.")
+
+    Component(command_handler, "Command Handler", "Go", "Принимает команды от Local API. Обновляет правила Rule Engine. Транслирует команды устройствам через NATS в IoT Gateway Node.")
+}
+
+Rel(farm_broker, nats_consumer, "DetectionEvent / TelemetryEvent / DeviceAlert", "NATS JetStream")
+Rel(nats_consumer, event_dispatcher, "Входящие события", "In-process channel")
+Rel(event_dispatcher, rule_engine, "Событие на проверку", "In-process")
+Rel(rule_engine, incident_manager, "Сработавшие правила", "In-process")
+Rel(incident_manager, alert_router, "Инцидент", "In-process")
+Rel(connectivity_monitor, alert_router, "Статус связи", "In-process")
+Rel(alert_router, local_notify, "Алерт при офлайне", "Internal gRPC")
+Rel(alert_router, sync_agent, "Инцидент для отправки", "In-process")
+Rel(sync_agent, aggregation_svc, "Синхронизация (<=10 мин)", "HTTPS / MQTT")
+Rel(local_api, command_handler, "Команды оператора", "Internal gRPC")
+Rel(command_handler, rule_engine, "Обновление правил", "In-process")
+Rel(command_handler, farm_broker, "Команды устройствам", "NATS publish")
+Rel(farm_broker, iot_hub, "Команды в IoT Gateway", "NATS")
+
+@enduml

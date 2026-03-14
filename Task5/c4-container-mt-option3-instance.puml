@@ -1,0 +1,52 @@
+@startuml C4_Container_MT_Option3_InstancePerTenant
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title C4 Container — Мультитенантность: Вариант 3 (отдельный инстанс на тенанта)
+
+Person(tenant_user, "Пользователь тенанта", "Оператор или менеджер фермы клиента.")
+Person(admin, "Администратор платформы", "Управляет тенантами и инстансами через Control Plane.")
+
+System_Boundary(control_plane, "Control Plane (общий)") {
+    Container(api_gw_global, "Global API Gateway", "Kong", "Единая точка входа. Маршрутизирует запросы к инстансу нужного тенанта по subdomain или tenant_id.")
+    Container(tenant_provisioner, "Tenant Provisioner", "Go", "Автоматически разворачивает новый инстанс платформы при онбординге. Управляет жизненным циклом инстансов.")
+    Container(billing_svc, "Billing Service", "Go", "Агрегирует метрики использования со всех инстансов. Выставляет счета. Интеграция с платёжными системами.")
+    Container(devportal, "Developer Portal", "Docusaurus", "Единая документация API для всех клиентов.")
+    Container(control_db, "Control Plane DB", "PostgreSQL", "Реестр тенантов, адреса инстансов, тарифные планы.")
+    Container(metrics_collector, "Metrics Collector", "Prometheus", "Сбор метрик использования со всех инстансов для биллинга и мониторинга.")
+}
+
+System_Boundary(tenant_a, "Инстанс: АгроТех X") {
+    Container(api_a, "API Gateway A", "Kong", "Изолированный API-шлюз тенанта.")
+    Container(platform_a, "AgroVision Platform A", "Docker / K8s namespace", "Полный набор сервисов платформы: Auth, Analytics, Sync, Notifications.")
+    Container(db_a, "Database A", "PostgreSQL", "Полностью изолированная БД тенанта.")
+}
+
+System_Boundary(tenant_b, "Инстанс: Клиент B") {
+    Container(api_b, "API Gateway B", "Kong", "Изолированный API-шлюз тенанта.")
+    Container(platform_b, "AgroVision Platform B", "Docker / K8s namespace", "Полный набор сервисов платформы.")
+    Container(db_b, "Database B", "PostgreSQL", "Полностью изолированная БД тенанта.")
+}
+
+System_Ext(farm_agent, "Farm Agent (агент на ферме)", "Оборудование клиента.")
+System_Ext(payment_ru, "Российские платёжные системы", "ЮKassa, ТБанк Касса, СБП.")
+System_Ext(client_erp, "ERP / системы клиента", "Корпоративные системы клиента.")
+
+Rel(tenant_user, api_gw_global, "REST / WebSocket", "HTTPS")
+Rel(admin, api_gw_global, "Управление платформой", "HTTPS")
+Rel(api_gw_global, api_a, "Маршрутизация к инстансу А", "HTTPS")
+Rel(api_gw_global, api_b, "Маршрутизация к инстансу B", "HTTPS")
+Rel(api_a, platform_a, "Запросы", "HTTP")
+Rel(api_b, platform_b, "Запросы", "HTTP")
+Rel(platform_a, db_a, "Данные тенанта", "SQL")
+Rel(platform_b, db_b, "Данные тенанта", "SQL")
+Rel(tenant_provisioner, control_db, "Реестр инстансов", "SQL")
+Rel(tenant_provisioner, api_a, "Провизионирование", "K8s API")
+Rel(tenant_provisioner, api_b, "Провизионирование", "K8s API")
+Rel(metrics_collector, platform_a, "Сбор метрик", "Prometheus scrape")
+Rel(metrics_collector, platform_b, "Сбор метрик", "Prometheus scrape")
+Rel(billing_svc, metrics_collector, "Метрики для биллинга", "PromQL")
+Rel(billing_svc, payment_ru, "Выставление счетов", "HTTPS API")
+Rel(farm_agent, api_gw_global, "Синхронизация данных фермы", "HTTPS / MQTT")
+Rel(platform_a, client_erp, "Webhook метрики", "REST API")
+
+@enduml

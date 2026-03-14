@@ -1,0 +1,96 @@
+@startuml C4_Container_Solution2
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title C4 Container — АгроТех X: AgroVision (Решение 2 — Альтернативное, fog-кластер)
+
+Person(operator, "Оператор фермы", "Дежурный сотрудник. Получает алерты, управляет устройствами.")
+Person(manager, "Менеджер / ветеринар", "Просматривает аналитику и отчёты.")
+
+' ─────────────────────────────────────────────
+' ЦЕНТРАЛЬНЫЙ УЗЕЛ (лёгкий)
+' ─────────────────────────────────────────────
+System_Boundary(central, "AgroVision — Лёгкий центральный узел") {
+
+    Container(api_gw, "API Gateway", "Nginx / Kong", "Единая точка входа для клиентских приложений. TLS, rate limiting.")
+    Container(auth_svc, "Auth Service", "Keycloak", "OIDC-аутентификация, RBAC, управление ролями.")
+    Container(aggregation_svc, "Aggregation Service", "Go", "Приём итоговых метрик от ферм, минимальная агрегация, хранение истории.")
+    Container(central_db, "Central Database", "PostgreSQL", "Агрегированные метрики и история событий по всем фермам.")
+}
+
+' ─────────────────────────────────────────────
+' FOG-КЛАСТЕР НА ФЕРМЕ
+' ─────────────────────────────────────────────
+System_Boundary(farm, "Fog-кластер на ферме") {
+
+    ' Узел 1: Видеоаналитика
+    System_Boundary(video_node, "Video Analytics Node (GPU-сервер)") {
+        Container(video_analytics, "Video Analytics Service", "Python / OpenCV + ONNX", "Инференс нейросети: детекция драк, задавливания, болезни, подсчёт голов.")
+        Container(video_db, "Video Events DB", "PostgreSQL", "Локальное хранилище событий видеоаналитики.")
+    }
+
+    ' Узел 2: IoT-шлюз
+    System_Boundary(iot_node, "IoT Gateway Node") {
+        Container(iot_hub, "IoT Gateway Service", "Python", "Управление кормушками, поилками, датчиками. Адаптеры мульти-вендорных устройств.")
+        Container(iot_db, "IoT Telemetry DB", "InfluxDB", "Временные ряды телеметрии IoT-устройств.")
+    }
+
+    ' Узел 3: Брокер событий и уведомлений
+    System_Boundary(event_node, "Edge Event & Notification Node") {
+        Container(farm_broker, "Farm Message Broker", "NATS / Mosquitto", "Внутрифермовая шина событий. Маршрутизация между узлами, офлайн-буфер.")
+        Container(event_engine, "Event Engine", "Go", "Применение правил алертов, агрегация событий от видео и IoT узлов.")
+        Container(local_notify, "Local Notifier", "Go", "SMS и звуковые алерты оператору. Работает при отсутствии интернета.")
+        Container(sync_agent, "Sync Agent", "Go", "Буферизация данных при офлайне. Инкрементная синхронизация с центральным узлом.")
+        Container(local_api, "Local API", "Go / Gin", "REST API для локального интерфейса оператора на ферме.")
+    }
+}
+
+' ─────────────────────────────────────────────
+' ВНЕШНИЕ СИСТЕМЫ
+' ─────────────────────────────────────────────
+System_Ext(mobile_web, "Мобильное / веб-приложение", "Клиентские приложения операторов и менеджеров.")
+System_Ext(cameras, "IP-камеры (мульти-вендор)", "RTSP-видеопоток, ИК для ночной съёмки.")
+System_Ext(iot_devices, "IoT-устройства", "Кормушки, поилки, датчики воды. MQTT / Modbus.")
+System_Ext(nn_model, "Нейросетевая модель (партнёр)", "ONNX-модель детекции поведения и состояния животных.")
+System_Ext(erp, "ERP / AgTech системы", "Корпоративные системы АгроТех X.")
+System_Ext(sms_gw, "SMS-шлюз / 4G", "Доставка SMS. Резервный канал при отказе WiFi.")
+System_Ext(lora, "LoRaWAN", "Резервный канал для IoT-датчиков с малым трафиком.")
+
+' ─────────────────────────────────────────────
+' ОТНОШЕНИЯ — клиенты → центр
+' ─────────────────────────────────────────────
+Rel(manager, mobile_web, "Использует", "HTTPS")
+Rel(mobile_web, api_gw, "REST запросы", "HTTPS")
+Rel(api_gw, auth_svc, "Проверка токена", "HTTP")
+Rel(api_gw, aggregation_svc, "Запросы агрегированных данных", "HTTP")
+Rel(aggregation_svc, central_db, "Чтение и запись метрик", "SQL")
+Rel(aggregation_svc, erp, "Передача ключевых метрик", "REST API")
+
+' ─────────────────────────────────────────────
+' ОТНОШЕНИЯ — Video Analytics Node
+' ─────────────────────────────────────────────
+Rel(cameras, video_analytics, "Видеопоток", "RTSP")
+Rel(nn_model, video_analytics, "Модель детекции", "ONNX deploy")
+Rel(video_analytics, video_db, "Сохранение событий детекции", "SQL")
+Rel(video_analytics, farm_broker, "Публикация событий детекции", "NATS")
+
+' ─────────────────────────────────────────────
+' ОТНОШЕНИЯ — IoT Gateway Node
+' ─────────────────────────────────────────────
+Rel(iot_devices, iot_hub, "Телеметрия и команды", "MQTT / Modbus")
+Rel(lora, iot_hub, "Резервная телеметрия", "LoRaWAN")
+Rel(iot_hub, iot_db, "Запись телеметрии", "InfluxDB API")
+Rel(iot_hub, farm_broker, "Публикация событий IoT", "NATS")
+
+' ─────────────────────────────────────────────
+' ОТНОШЕНИЯ — Event & Notification Node
+' ─────────────────────────────────────────────
+Rel(farm_broker, event_engine, "Подписка на события видео и IoT", "NATS")
+Rel(event_engine, local_notify, "Критические алерты", "Internal")
+Rel(local_notify, sms_gw, "SMS оператору при офлайне", "HTTPS / 4G")
+Rel(event_engine, sync_agent, "Агрегированные события для синхронизации", "Internal")
+Rel(sync_agent, aggregation_svc, "Инкрементная синхронизация (<=10 мин)", "HTTPS / MQTT")
+Rel(operator, local_api, "Управление и мониторинг", "HTTPS LAN")
+Rel(local_api, event_engine, "Команды оператора", "Internal gRPC")
+Rel(local_api, farm_broker, "Чтение состояния узлов", "NATS")
+
+@enduml

@@ -1,0 +1,54 @@
+@startuml C4_Component_S2_VideoNode
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title C4 Component — Video Analytics Node (Решение 2, fog-кластер)
+
+Container_Ext(cameras, "IP-камеры (мульти-вендор)", "RTSP", "Видеопоток день/ночь.")
+Container_Ext(nn_model, "Нейросетевая модель (партнёр)", "ONNX", "Модель детекции.")
+Container_Ext(farm_broker, "Farm Message Broker", "NATS", "Внутрифермовая шина событий.")
+Container_Ext(video_db, "Video Events DB", "PostgreSQL", "Хранилище событий детекции.")
+
+Container_Boundary(vn, "Video Analytics Node (Python / OpenCV + ONNX Runtime)") {
+
+    Component(stream_manager, "Stream Manager", "Python / OpenCV",
+        "Открывает и поддерживает RTSP-соединения. Пул потоков: один поток на камеру. Автопереподключение при обрыве потока.")
+
+    Component(frame_preprocessor, "Frame Preprocessor", "Python / NumPy",
+        "Декодирование, масштабирование, нормализация кадров. Фильтрация дублей по перцептивному хэшу.")
+
+    Component(inference_engine, "Inference Engine", "ONNX Runtime + CUDA",
+        "Пакетный инференс на GPU. Возвращает bounding boxes, классы, уверенность.")
+
+    Component(detection_postprocessor, "Detection Postprocessor", "Python",
+        "Применение порогов уверенности. Non-Maximum Suppression. Координатное преобразование.")
+
+    Component(animal_tracker, "Animal Tracker", "Python / OpenCV",
+        "Трекинг особей по IoU между кадрами. Присвоение track_id в рамках сессии.")
+
+    Component(event_classifier, "Event Classifier", "Python",
+        "Классификация событий: драка, задавливание, болезнь, гибель, норма. Подсчёт поголовья по track_id.")
+
+    Component(model_loader, "Model Loader", "Python",
+        "Загрузка и проверка ONNX-модели. Поддержка горячей замены модели.")
+
+    Component(nats_publisher, "NATS Publisher", "Python / nats.py",
+        "Публикует DetectionEvent в топик farm.detection. Гарантия доставки через NATS JetStream. Повторная отправка при таймауте подтверждения.")
+
+    Component(event_persister, "Event Persister", "Python / SQLAlchemy",
+        "Параллельно сохраняет DetectionEvent в локальный Video Events DB. Служит резервом на случай недоступности брокера.")
+}
+
+Rel(cameras, stream_manager, "Видеопоток", "RTSP")
+Rel(nn_model, model_loader, "Файл модели", "ONNX / filesystem")
+Rel(stream_manager, frame_preprocessor, "Сырые кадры", "In-process")
+Rel(frame_preprocessor, inference_engine, "Нормализованные тензоры", "In-process")
+Rel(model_loader, inference_engine, "Загруженная модель", "In-process")
+Rel(inference_engine, detection_postprocessor, "Raw bounding boxes", "In-process")
+Rel(detection_postprocessor, animal_tracker, "Отфильтрованные детекции", "In-process")
+Rel(animal_tracker, event_classifier, "Детекции с track_id", "In-process")
+Rel(event_classifier, nats_publisher, "Классифицированное событие", "In-process")
+Rel(event_classifier, event_persister, "Классифицированное событие", "In-process")
+Rel(nats_publisher, farm_broker, "DetectionEvent", "NATS JetStream")
+Rel(event_persister, video_db, "Сохранение DetectionEvent", "SQL")
+
+@enduml

@@ -1,0 +1,71 @@
+@startuml C4_Container_SaaS_ToBe
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title C4 Container — AgroVision SaaS: финальная архитектура To-Be
+
+Person(tenant_user, "Пользователь тенанта", "Оператор или менеджер агрохолдинга-клиента.")
+Person(platform_admin, "Администратор платформы", "Управляет тенантами, тарифами, платформой.")
+Person(developer, "Разработчик клиента", "Интегрирует AgroVision с системами клиента.")
+
+System_Boundary(saas, "AgroVision SaaS — Центральная платформа") {
+
+    Container(api_gw, "API Gateway", "Kong", "Единая точка входа. Маршрутизация, TLS, rate limiting. Извлекает tenant_id из JWT.")
+    Container(auth_svc, "Auth Service", "Keycloak", "OIDC, RBAC. Отдельный realm на тенанта. Выдаёт токены с tenant_id и ролями.")
+    Container(tenant_svc, "Tenant Service", "Go", "Онбординг клиентов, управление тарифными планами, лимиты использования, самообслуживание через API.")
+    Container(analytics_svc, "Analytics Service", "Python / FastAPI", "Агрегация метрик ферм, тренды, отчёты, прогнозы. Изоляция по schema search_path.")
+    Container(sync_svc, "Sync Service", "Go", "Приём данных от Farm Agent. Запись в схему тенанта. Проверка принадлежности агента тенанту.")
+    Container(billing_svc, "Billing Service", "Go", "Учёт метрик использования (число ферм, событий, камер, голов). Формирование счетов. Тарифные планы.")
+    Container(payment_svc, "Payment Service", "Go", "Интеграция с ЮKassa, ТБанк Касса, СБП. Обработка платежей, webhooks от платёжных систем.")
+    Container(notification_svc, "Notification Service", "Node.js", "Push и SMS уведомления. Маршрутизация по tenant_id. Шаблоны уведомлений.")
+    Container(public_api, "Public API", "Go / Gin", "Открытый API для интеграции клиентов. Версионирование. Документация через OpenAPI.")
+    Container(devportal, "Developer Portal", "Docusaurus", "Документация API, SDK, примеры интеграции, sandbox-среда для тестирования.")
+    Container(admin_panel, "Self-Service Panel", "React", "Веб-интерфейс для управления аккаунтом, фермами, подпиской, счетами.")
+    Container(message_broker, "Message Broker", "RabbitMQ", "Асинхронная шина. Очереди с префиксом tenant_id для изоляции потоков сообщений.")
+    Container(metrics_store, "Metrics Store", "PostgreSQL + TimescaleDB", "Временные ряды метрик использования для биллинга и аналитики платформы.")
+    Container(tenant_db, "Tenant Database", "PostgreSQL", "Единый кластер. Изоляция данных тенантов через отдельные схемы (schema-per-tenant).")
+}
+
+System_Boundary(farm_infra, "Инфраструктура клиента") {
+    Container(farm_agent, "Farm Agent", "Go + Python", "Автономный агент на ферме. Видеоаналитика, IoT, офлайн-буфер, синхронизация с платформой.")
+}
+
+System_Ext(payment_ru, "Платёжные системы РФ", "ЮKassa, ТБанк Касса, СБП.")
+System_Ext(client_erp, "ERP / системы клиента", "Корпоративные системы агрохолдинга.")
+System_Ext(sms_gw, "SMS-шлюз", "МТС Exolve, СМСК или аналог.")
+System_Ext(nn_partner, "Нейросетевая модель (партнёр)", "ONNX-модель детекции.")
+
+Rel(tenant_user, api_gw, "REST / WebSocket", "HTTPS")
+Rel(tenant_user, admin_panel, "Управление аккаунтом", "HTTPS")
+Rel(platform_admin, api_gw, "Администрирование", "HTTPS")
+Rel(developer, devportal, "Изучение документации", "HTTPS")
+Rel(developer, public_api, "Интеграция через API", "HTTPS")
+
+Rel(api_gw, auth_svc, "Проверка токена", "HTTP")
+Rel(api_gw, analytics_svc, "Аналитика и отчёты", "HTTP")
+Rel(api_gw, tenant_svc, "Управление тенантом", "HTTP")
+Rel(api_gw, billing_svc, "Биллинг и подписки", "HTTP")
+Rel(api_gw, public_api, "Клиентские интеграции", "HTTP")
+Rel(api_gw, sync_svc, "Управляющие команды", "HTTP")
+
+Rel(auth_svc, tenant_db, "Данные пользователей и ролей", "SQL")
+Rel(analytics_svc, tenant_db, "Данные тенанта (schema)", "SQL")
+Rel(sync_svc, tenant_db, "Запись событий фермы", "SQL")
+Rel(tenant_svc, tenant_db, "Управление схемами тенантов", "SQL DDL")
+
+Rel(sync_svc, message_broker, "Публикация событий", "AMQP")
+Rel(analytics_svc, message_broker, "Подписка на события", "AMQP")
+Rel(notification_svc, message_broker, "Подписка на алерты", "AMQP")
+Rel(billing_svc, message_broker, "Подписка на метрики использования", "AMQP")
+
+Rel(billing_svc, metrics_store, "Запись и чтение метрик", "SQL")
+Rel(billing_svc, payment_svc, "Инициация платежа", "Internal gRPC")
+Rel(payment_svc, payment_ru, "Проведение платежа", "HTTPS API")
+
+Rel(notification_svc, sms_gw, "SMS уведомления", "HTTPS")
+Rel(public_api, analytics_svc, "Данные для клиентских интеграций", "Internal HTTP")
+Rel(analytics_svc, client_erp, "Webhook метрики", "HTTPS")
+
+Rel(farm_agent, sync_svc, "Синхронизация событий (<=10 мин)", "HTTPS / MQTT")
+Rel(nn_partner, farm_agent, "Поставка ONNX-модели", "Деплой")
+
+@enduml

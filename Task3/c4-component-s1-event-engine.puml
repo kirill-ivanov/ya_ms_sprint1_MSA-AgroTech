@@ -1,0 +1,48 @@
+@startuml C4_Component_S1_EventEngine
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title C4 Component — Event Engine (Решение 1, Farm Agent)
+
+Container_Ext(video_analytics, "Video Analytics", "Python / gRPC", "Публикует DetectionEvent.")
+Container_Ext(iot_hub, "IoT Hub", "Python / gRPC", "Публикует TelemetryEvent и DeviceAlert.")
+Container_Ext(local_db, "Local Database", "PostgreSQL", "Хранилище событий и инцидентов.")
+Container_Ext(local_notify, "Local Notifier", "Go", "Отправка SMS и звуковых сигналов.")
+Container_Ext(sync_svc, "Sync Service (центр)", "HTTPS / MQTT", "Получает синхронизируемые события.")
+Container_Ext(local_api, "Local API", "Go / gRPC", "Управляющие команды от оператора.")
+
+Container_Boundary(ee, "Event Engine (Go)") {
+
+    Component(grpc_receiver, "gRPC Receiver", "Go / grpcio", "Принимает входящие стримы от Video Analytics и IoT Hub. Демультиплексирует события по типу.")
+
+    Component(event_dispatcher, "Event Dispatcher", "Go", "Маршрутизирует события по типу к нужному обработчику. Ring-buffer для сглаживания пиков нагрузки.")
+
+    Component(rule_engine, "Rule Engine", "Go", "Применяет правила алертов (пороги, временные окна, комбинации). Поддерживает пользовательские правила через YAML-конфиг.")
+
+    Component(incident_manager, "Incident Manager", "Go", "Создаёт и обновляет инциденты. Дедупликация и автозакрытие при нормализации показателей.")
+
+    Component(alert_router, "Alert Router", "Go", "Определяет каналы уведомления. При наличии связи отправляет в Sync Buffer, иначе в Local Notifier.")
+
+    Component(connectivity_monitor, "Connectivity Monitor", "Go", "Проверяет доступность центрального сервера. Переключает Alert Router между онлайн- и офлайн-режимом.")
+
+    Component(sync_buffer, "Sync Buffer", "Go", "Буферизует события в Local DB при отсутствии связи. Инкрементная отправка по версии записи при восстановлении.")
+
+    Component(command_handler, "Command Handler", "Go", "Принимает команды от Local API (обновить правила, подтвердить инцидент). Транслирует команды устройствам в IoT Hub.")
+}
+
+Rel(video_analytics, grpc_receiver, "DetectionEvent", "gRPC stream")
+Rel(iot_hub, grpc_receiver, "TelemetryEvent / DeviceAlert", "gRPC stream")
+Rel(grpc_receiver, event_dispatcher, "Входящие события", "In-process channel")
+Rel(event_dispatcher, rule_engine, "Событие на проверку правил", "In-process")
+Rel(rule_engine, incident_manager, "Событие + сработавшие правила", "In-process")
+Rel(incident_manager, local_db, "Сохранение инцидентов", "SQL")
+Rel(incident_manager, alert_router, "Новый или обновлённый инцидент", "In-process")
+Rel(connectivity_monitor, alert_router, "Статус связи (онлайн/офлайн)", "In-process")
+Rel(alert_router, local_notify, "Критический алерт при офлайне", "Internal gRPC")
+Rel(alert_router, sync_buffer, "Инцидент для синхронизации", "In-process")
+Rel(sync_buffer, local_db, "Буферизация событий", "SQL")
+Rel(sync_buffer, sync_svc, "Инкрементная синхронизация (<=10 мин)", "HTTPS / MQTT")
+Rel(local_api, command_handler, "Команды оператора", "Internal gRPC")
+Rel(command_handler, rule_engine, "Обновление правил", "In-process")
+Rel(command_handler, iot_hub, "Команды устройствам", "gRPC")
+
+@enduml

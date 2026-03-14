@@ -1,0 +1,54 @@
+@startuml C4_Container_MT_Option2_DBPerTenant
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title C4 Container — Мультитенантность: Вариант 2 (отдельная БД на тенанта)
+
+Person(tenant_user, "Пользователь тенанта", "Оператор или менеджер фермы клиента.")
+Person(admin, "Администратор платформы", "Управляет тенантами, тарифами, биллингом.")
+
+System_Boundary(saas, "AgroVision SaaS — Центральная платформа") {
+
+    Container(api_gw, "API Gateway", "Kong", "Маршрутизация, TLS, rate limiting. Извлекает tenant_id и направляет запрос к нужному пулу соединений.")
+    Container(auth_svc, "Auth Service", "Keycloak", "OIDC, RBAC. Отдельный realm на тенанта. Токен содержит tenant_id.")
+    Container(tenant_svc, "Tenant Service", "Go", "Управление тенантами. При онбординге провизионирует новую БД и регистрирует строку подключения в DB Router.")
+    Container(db_router, "DB Router", "Go", "Хранит map tenant_id -> connection_string. Выдаёт нужный пул соединений сервисам по tenant_id из контекста запроса.")
+    Container(analytics_svc, "Analytics Service", "Python / FastAPI", "Агрегация метрик. Получает соединение от DB Router по tenant_id из токена.")
+    Container(sync_svc, "Sync Service", "Go", "Приём данных от агентов. Получает соединение от DB Router и записывает в БД конкретного тенанта.")
+    Container(billing_svc, "Billing Service", "Go", "Учёт использования, формирование счетов, интеграция с платёжными системами.")
+    Container(notification_svc, "Notification Service", "Node.js", "Push и SMS уведомления с маршрутизацией по tenant_id.")
+    Container(devportal, "Developer Portal", "Docusaurus", "Документация API, SDK, примеры интеграции.")
+    Container(message_broker, "Message Broker", "RabbitMQ", "Асинхронная шина. Очереди с префиксом tenant_id.")
+
+    Container(tenant_db_a, "Tenant DB: АгроТех X", "PostgreSQL", "Изолированная БД первого клиента. Полный контроль над схемой и индексами.")
+    Container(tenant_db_b, "Tenant DB: Клиент B", "PostgreSQL", "Изолированная БД второго клиента.")
+    Container(tenant_db_n, "Tenant DB: Клиент N", "PostgreSQL", "БД N-го клиента. Каждая БД может быть на отдельном хосте.")
+    Container(metrics_db, "Metrics & Billing DB", "PostgreSQL", "Общая БД метрик использования для биллинга.")
+}
+
+System_Ext(farm_agent, "Farm Agent (агент на ферме)", "Оборудование клиента. Синхронизируется с платформой.")
+System_Ext(payment_ru, "Российские платёжные системы", "ЮKassa, ТБанк Касса, СБП.")
+System_Ext(client_erp, "ERP / системы клиента", "Корпоративные системы агрохолдинга-клиента.")
+System_Ext(sms_gw, "SMS-шлюз", "Уведомления операторам.")
+
+Rel(tenant_user, api_gw, "REST / WebSocket", "HTTPS")
+Rel(admin, api_gw, "Управление платформой", "HTTPS")
+Rel(api_gw, auth_svc, "Проверка токена", "HTTP")
+Rel(api_gw, analytics_svc, "Запросы аналитики", "HTTP")
+Rel(api_gw, tenant_svc, "Управление тенантом", "HTTP")
+Rel(api_gw, billing_svc, "Запросы биллинга", "HTTP")
+Rel(analytics_svc, db_router, "Запрос соединения по tenant_id", "In-process")
+Rel(sync_svc, db_router, "Запрос соединения по tenant_id", "In-process")
+Rel(db_router, tenant_db_a, "Соединение для АгроТех X", "SQL")
+Rel(db_router, tenant_db_b, "Соединение для Клиента B", "SQL")
+Rel(db_router, tenant_db_n, "Соединение для Клиента N", "SQL")
+Rel(sync_svc, message_broker, "Публикация событий", "AMQP")
+Rel(analytics_svc, message_broker, "Подписка на события", "AMQP")
+Rel(notification_svc, message_broker, "Подписка на алерты", "AMQP")
+Rel(notification_svc, sms_gw, "SMS уведомления", "HTTPS")
+Rel(billing_svc, metrics_db, "Запись и чтение метрик", "SQL")
+Rel(billing_svc, payment_ru, "Выставление счетов и оплата", "HTTPS API")
+Rel(tenant_svc, db_router, "Регистрация новой БД тенанта", "In-process")
+Rel(farm_agent, sync_svc, "Синхронизация данных фермы", "HTTPS / MQTT")
+Rel(analytics_svc, client_erp, "Передача метрик по webhook", "REST API")
+
+@enduml

@@ -1,0 +1,39 @@
+@startuml C4_Context_SaaS_ToBe
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+title C4 Context — AgroVision SaaS: финальная архитектура To-Be
+
+Person(tenant_operator, "Оператор фермы (клиент)", "Сотрудник агрохолдинга-клиента. Получает алерты, управляет устройствами.")
+Person(tenant_manager, "Менеджер / ветеринар (клиент)", "Просматривает аналитику, отчёты, управляет подпиской.")
+Person(platform_admin, "Администратор платформы", "Управляет тенантами, тарифами, мониторингом платформы.")
+Person(developer, "Разработчик клиента", "Интегрирует AgroVision API с системами своего агрохолдинга.")
+
+Enterprise_Boundary(agrovision, "AgroVision SaaS") {
+
+    System_Boundary(saas_platform, "Платформа AgroVision") {
+        System(saas_core, "AgroVision Core", "Мультитенантная платформа: аналитика, синхронизация, уведомления, биллинг, управление тенантами.")
+    }
+
+    System_Boundary(client_infra, "Инфраструктура клиента (on-premise)") {
+        System(farm_agent, "Farm Agent", "Автономный агент на ферме: видеоаналитика, IoT-управление, офлайн-работа, синхронизация с платформой.")
+    }
+}
+
+System_Ext(payment_ru, "Российские платёжные системы", "ЮKassa, ТБанк Касса, СБП. Приём оплаты подписок.")
+System_Ext(client_erp, "ERP / системы клиента", "Корпоративные системы агрохолдинга. Получают метрики через API или webhook.")
+System_Ext(nn_partner, "Нейросетевая модель (партнёр)", "ONNX-модель детекции. Поставляется на агент клиента.")
+System_Ext(sms_gw, "SMS / Push шлюз", "Доставка уведомлений операторам и менеджерам.")
+System_Ext(devportal_ext, "Developer Portal", "Документация API, SDK, песочница для разработчиков клиентов.")
+
+Rel(tenant_operator, farm_agent, "Получает алерты, управляет устройствами", "Локальная сеть / SMS")
+Rel(tenant_manager, saas_core, "Аналитика, отчёты, управление подпиской", "HTTPS (веб/мобайл)")
+Rel(platform_admin, saas_core, "Управление тенантами и платформой", "HTTPS (admin panel)")
+Rel(developer, devportal_ext, "Изучение документации, тестирование API", "HTTPS")
+Rel(developer, saas_core, "Интеграция через Public API", "REST / Webhook")
+Rel(farm_agent, saas_core, "Синхронизация событий и метрик (<=10 мин)", "HTTPS / MQTT")
+Rel(saas_core, payment_ru, "Выставление счетов, приём оплаты", "HTTPS API")
+Rel(saas_core, client_erp, "Передача метрик поголовья и событий", "REST / Webhook")
+Rel(saas_core, sms_gw, "Уведомления пользователям", "HTTPS")
+Rel(nn_partner, farm_agent, "Поставка модели детекции", "Деплой ONNX")
+
+@enduml

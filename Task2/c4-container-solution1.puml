@@ -1,0 +1,85 @@
+@startuml C4_Container_Solution1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title C4 Container — АгроТех X: AgroVision (Решение 1 — Основное)
+
+Person(operator, "Оператор фермы", "Дежурный сотрудник. Получает алерты, управляет устройствами.")
+Person(manager, "Менеджер / ветеринар", "Просматривает аналитику и отчёты.")
+
+' ─────────────────────────────────────────────
+' ЦЕНТРАЛЬНАЯ ПЛАТФОРМА
+' ─────────────────────────────────────────────
+System_Boundary(central, "AgroVision — Центральная платформа") {
+
+    Container(api_gw, "API Gateway", "Nginx / Kong", "Единая точка входа. Маршрутизация, rate limiting, TLS-терминация.")
+    Container(auth_svc, "Auth Service", "Keycloak", "OIDC-аутентификация, RBAC-авторизация, управление ролями и токенами.")
+    Container(analytics_svc, "Analytics Service", "Python / FastAPI", "Агрегация метрик с ферм, тренды, отчёты, прогнозы расхода корма.")
+    Container(sync_svc, "Sync Service", "Go", "Приём и запись данных от агентов ферм. Разрешение конфликтов при офлайн-синхронизации.")
+    Container(notification_svc, "Notification Service", "Node.js", "Глобальные push- и email-уведомления для менеджеров.")
+    Container(central_db, "Central Database", "PostgreSQL", "Агрегированные события, метрики, история поголовья всех ферм.")
+    Container(message_broker, "Message Broker", "RabbitMQ", "Асинхронная шина между сервисами центральной платформы.")
+}
+
+' ─────────────────────────────────────────────
+' АГЕНТ НА ФЕРМЕ
+' ─────────────────────────────────────────────
+System_Boundary(farm, "Farm Agent — Агент на ферме (edge)") {
+
+    Container(video_analytics, "Video Analytics", "Python / OpenCV + ONNX", "Инференс нейросети на GPU: детекция драк, задавливания, болезни, подсчёт голов.")
+    Container(iot_hub, "IoT Hub", "Python / MQTT Broker (Mosquitto)", "Управление кормушками, поилками, датчиками воды. Адаптеры для мульти-вендорных устройств.")
+    Container(event_engine, "Event Engine", "Go", "Обработка событий от видеоаналитики и IoT. Применение правил алертов, формирование уведомлений.")
+    Container(local_api, "Local API", "Go / Gin", "REST API для локального веб-интерфейса оператора и управления агентом.")
+    Container(local_db, "Local Database", "SQLite / PostgreSQL", "Локальное хранилище событий, телеметрии, буфер офлайн-данных для синхронизации.")
+    Container(local_notify, "Local Notifier", "Go", "Отправка SMS и звуковых сигналов оператору при офлайне и критических событиях.")
+}
+
+' ─────────────────────────────────────────────
+' ВНЕШНИЕ СИСТЕМЫ
+' ─────────────────────────────────────────────
+System_Ext(mobile_web, "Мобильное / веб-приложение", "Клиентские приложения операторов и менеджеров.")
+System_Ext(cameras, "IP-камеры (мульти-вендор)", "RTSP-видеопоток, ИК для ночной съёмки.")
+System_Ext(iot_devices, "IoT-устройства", "Кормушки, поилки, датчики воды. MQTT / Modbus.")
+System_Ext(nn_model, "Нейросетевая модель (партнёр)", "ONNX-модель детекции поведения и состояния животных.")
+System_Ext(erp, "ERP / AgTech системы", "Корпоративные системы АгроТех X.")
+System_Ext(sms_gw, "SMS-шлюз", "Доставка SMS-уведомлений операторам и менеджерам.")
+System_Ext(lora, "LoRaWAN / 4G", "Резервные каналы связи при отказе WiFi.")
+
+' ─────────────────────────────────────────────
+' ОТНОШЕНИЯ — клиенты → центр
+' ─────────────────────────────────────────────
+Rel(manager, mobile_web, "Использует", "HTTPS")
+Rel(mobile_web, api_gw, "REST / WebSocket запросы", "HTTPS")
+Rel(api_gw, auth_svc, "Проверка токена", "gRPC / HTTP")
+Rel(api_gw, analytics_svc, "Запросы аналитики и отчётов", "HTTP")
+Rel(api_gw, sync_svc, "Управляющие команды", "HTTP")
+Rel(auth_svc, central_db, "Данные пользователей и ролей", "SQL")
+Rel(analytics_svc, central_db, "Чтение агрегированных данных", "SQL")
+Rel(sync_svc, central_db, "Запись событий с ферм", "SQL")
+Rel(sync_svc, message_broker, "Публикация событий синхронизации", "AMQP")
+Rel(analytics_svc, message_broker, "Подписка на события", "AMQP")
+Rel(notification_svc, message_broker, "Подписка на алерты", "AMQP")
+Rel(notification_svc, sms_gw, "Отправка SMS менеджерам", "HTTPS")
+Rel(analytics_svc, erp, "Передача метрик поголовья", "REST API")
+
+' ─────────────────────────────────────────────
+' ОТНОШЕНИЯ — агент фермы
+' ─────────────────────────────────────────────
+Rel(cameras, video_analytics, "Видеопоток", "RTSP")
+Rel(nn_model, video_analytics, "Модель детекции", "ONNX deploy")
+Rel(video_analytics, event_engine, "События детекции", "Internal gRPC")
+Rel(iot_devices, iot_hub, "Телеметрия и команды", "MQTT / Modbus")
+Rel(lora, iot_hub, "Резервная телеметрия", "LoRaWAN")
+Rel(iot_hub, event_engine, "События устройств", "Internal gRPC")
+Rel(event_engine, local_db, "Сохранение событий", "SQL")
+Rel(event_engine, local_notify, "Критические алерты", "Internal")
+Rel(local_notify, sms_gw, "SMS оператору при офлайне", "HTTPS / 4G")
+Rel(operator, local_api, "Управление и мониторинг", "HTTPS LAN")
+Rel(local_api, event_engine, "Команды оператора", "Internal gRPC")
+Rel(local_api, local_db, "Чтение событий и телеметрии", "SQL")
+
+' ─────────────────────────────────────────────
+' ОТНОШЕНИЯ — синхронизация агент → центр
+' ─────────────────────────────────────────────
+Rel(local_db, sync_svc, "Инкрементная синхронизация (<=10 мин)", "HTTPS / MQTT")
+
+@enduml
